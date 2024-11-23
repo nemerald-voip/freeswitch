@@ -771,6 +771,10 @@ switch_status_t pgsql_next_result_timed(switch_pgsql_handle_t *handle, switch_pg
 		case PGRES_SINGLE_TUPLE:
 			/* Added in PostgreSQL 9.2 */
 #endif
+#if PG_VERSION_NUM >= 160001
+                case PGRES_TUPLES_CHUNK:
+			/* Added in PostgreSQL 16 */
+#endif
 		case PGRES_TUPLES_OK:
 		{
 			res->rows = PQntuples(res->result);
