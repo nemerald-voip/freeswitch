@@ -11,7 +11,6 @@ PIDFile=/run/freeswitch/freeswitch.pid
 Environment="DAEMON_OPTS=-nonat"
 Environment="USER=www-data"
 Environment="GROUP=www-data"
-EnvironmentFile=-/etc/default/freeswitch
 
 # Ensure necessary directories exist and have proper permissions
 ExecStartPre=/bin/mkdir -p /var/run/freeswitch
