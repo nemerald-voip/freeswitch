@@ -2136,31 +2136,26 @@ static switch_uint31_t check_presence_epoch(void)
 
 uint32_t sofia_presence_get_cseq(sofia_profile_t *profile)
 {
-	switch_uint31_t callsequence;
+        switch_uint31_t callsequence;
+        int diff = 0;
 
-	switch_mutex_lock(profile->ireg_mutex);
+        switch_mutex_lock(profile->ireg_mutex);
 
-	callsequence = check_presence_epoch();
+        callsequence = check_presence_epoch();
 
-    /* Enforce strictly monotonic CSeq for NOTIFY to avoid New Year rollbacks
-       that some phones (e.g., Polycom) reject with 500. */
-    if (profile->last_cseq.value && callsequence.value <= profile->last_cseq.value) {
-        callsequence.value = profile->last_cseq.value + 1;
-    }
+        if (profile->last_cseq.value) {
+                diff = (int)callsequence.value - (int)profile->last_cseq.value;
+                if (diff <= 0 && diff > -100000) {
+                        callsequence.value = ++profile->last_cseq.value;
+                }
+        }
 
-   /* Keep within 31 bits and non-zero, matching switch_uint31_t semantics. */
-    callsequence.value &= 0x7fffffff;
-    if (callsequence.value == 0) {
-        callsequence.value = 1;
-    }
+        profile->last_cseq = callsequence;
 
-	profile->last_cseq = callsequence;
+        switch_mutex_unlock(profile->ireg_mutex);
 
-	switch_mutex_unlock(profile->ireg_mutex);
-
-	return (uint32_t)callsequence.value;
+        return (uint32_t)callsequence.value;
 }
-
 
 #define send_presence_notify(_a,_b,_c,_d,_e,_f,_g,_h,_i,_j,_k,_l) \
 _send_presence_notify(_a,_b,_c,_d,_e,_f,_g,_h,_i,_j,_k,_l,__FILE__, __SWITCH_FUNC__, __LINE__)
