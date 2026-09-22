@@ -1255,7 +1255,7 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_play_file(switch_core_session_t *sess
 	switch_frame_t write_frame = { 0 };
 	switch_timer_t timer = { 0 };
 	switch_codec_t codec = { 0 };
-	switch_memory_pool_t *pool = switch_core_session_get_pool(session);
+	switch_memory_pool_t *pool = NULL;
 	char *codec_name;
 	switch_status_t status = SWITCH_STATUS_SUCCESS;
 	switch_file_handle_t lfh;
@@ -1554,6 +1554,12 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_play_file(switch_core_session_t *sess
 		codec_name = "L16";
 
 		if (!switch_core_codec_ready((&codec))) {
+			/* Codec/timer locks and their APR cleanups belong to this playback,
+			 * not to every subsequent file played during the same call. */
+			if (!pool) {
+				switch_core_new_memory_pool(&pool);
+				switch_core_memory_pool_set_data(pool, "__session", session);
+			}
 			if (switch_core_codec_init(&codec,
 									   codec_name,
 									   NULL,
@@ -2076,6 +2082,9 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_play_file(switch_core_session_t *sess
 		switch_channel_set_variable_printf(channel, "playback_timeout_sec_cumulative", "%d", timeout_samples / read_impl.actual_samples_per_second);
 	}
 
+	if (pool) {
+		switch_core_destroy_memory_pool(&pool);
+	}
 
 	return status;
 }

@@ -369,7 +369,10 @@ SWITCH_DECLARE(void) switch_channel_perform_audio_sync(switch_channel_t *channel
 	if (switch_channel_media_up(channel)) {
 		switch_core_session_message_t *msg = NULL;
 
-		msg = switch_core_session_alloc(channel->session, sizeof(*msg));
+		/* Queue ownership ends when the indication is processed or flushed.
+		 * A session-pool allocation accumulates on every playback transition. */
+		switch_zmalloc(msg, sizeof(*msg));
+		switch_set_flag(msg, SCSMF_DYNAMIC);
 		MESSAGE_STAMP_FFL(msg);
 		msg->message_id = SWITCH_MESSAGE_INDICATE_AUDIO_SYNC;
 		msg->from = channel->name;
@@ -377,7 +380,9 @@ SWITCH_DECLARE(void) switch_channel_perform_audio_sync(switch_channel_t *channel
 		msg->_func = func;
 		msg->_line = line;
 
-		switch_core_session_queue_message(channel->session, msg);
+		if (switch_core_session_queue_message(channel->session, msg) != SWITCH_STATUS_SUCCESS) {
+			switch_core_session_free_message(&msg);
+		}
 	}
 }
 

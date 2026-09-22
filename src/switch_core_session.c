@@ -859,6 +859,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_session_perform_receive_message(swit
 	}
 
 	if ((status = switch_core_session_read_lock_hangup(session)) != SWITCH_STATUS_SUCCESS) {
+		switch_core_session_free_message(&message);
 		return status;
 	}
 
