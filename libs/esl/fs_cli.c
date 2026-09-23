@@ -136,31 +136,6 @@ static void clear_cli(void) {
 }
 #endif
 
-static void screen_size(int *x, int *y)
-{
-
-#ifdef WIN32
-	CONSOLE_SCREEN_BUFFER_INFO csbi;
-	int ret;
-
-	if ((ret = GetConsoleScreenBufferInfo(GetStdHandle( STD_OUTPUT_HANDLE ), &csbi))) {
-		if (x) *x = csbi.dwSize.X;
-		if (y) *y = csbi.dwSize.Y;
-	}
-
-#elif defined(TIOCGWINSZ)
-	struct winsize w;
-	if ( (ioctl(0, TIOCGWINSZ, &w)) >= 0 ) {
-		if (x) *x = w.ws_col;
-		if (y) *y = w.ws_row;
-	}
-#else
-	if (x) *x = 80;
-	if (y) *y = 24;
-#endif
-
-}
-
 #if defined(HAVE_LIBEDIT) || defined(WIN32)
 /* If a fnkey is configured then process the command */
 static unsigned char console_fnkey_pressed(int i)
@@ -1042,75 +1017,49 @@ static const char *basic_gets(int *cnt)
 	return command_buf;
 }
 
-static const char *banner =
-	".=======================================================.\n"
-    "|            _____ ____     ____ _     ___              |\n"
-    "|           |  ___/ ___|   / ___| |   |_ _|             |\n"
-    "|           | |_  \\___ \\  | |   | |    | |              |\n"
-    "|           |  _|  ___) | | |___| |___ | |              |\n"
-    "|           |_|   |____/   \\____|_____|___|             |\n"
-	"|                                                       |\n"
-	".=======================================================.\n"
-    "| Anthony Minessale II, Ken Rice,                       |\n"
-    "| Michael Jerris, Travis Cross                          |\n"
-    "| FreeSWITCH (http://www.freeswitch.org)                |\n"
-    "| Paypal Donations Appreciated: paypal@freeswitch.org   |\n"
-    "| Brought to you by ClueCon http://www.cluecon.com/     |\n"
-    ".=======================================================.\n"
-    "\n";
-
-static const char *inf = "Type /help <enter> to see a list of commands\n\n\n";
-
 static void print_banner(FILE *stream, int color)
 {
-	int x = 0;
-	const char *use = NULL;
-#include <cc.h>
-
-	screen_size(&x, NULL);
-
-	use = (x > 100) ? cc : cc_s;
-
 #ifdef WIN32
-	/* Print banner in yellow with blue background */
-	if (color) {
-		SetConsoleTextAttribute(hStdout, ESL_SEQ_FYELLOW | BACKGROUND_BLUE);
-	}
-	WriteFile(hStdout, banner, (DWORD) strlen(banner), NULL, NULL);
-	WriteFile(hStdout, use, (DWORD) strlen(use), NULL, NULL);
-	if (color) {
-		SetConsoleTextAttribute(hStdout, wOldColorAttrs);
-	}
+	HANDLE console = GetStdHandle(STD_OUTPUT_HANDLE);
+	CONSOLE_SCREEN_BUFFER_INFO info;
+	int use_color = color && GetConsoleScreenBufferInfo(console, &info);
 
-	/* Print the rest info in default colors */
-	fprintf(stream, "\n%s\n", inf);
+	if (use_color) {
+		SetConsoleTextAttribute(console, ESL_SEQ_FYELLOW);
+	}
 #else
-
 	if (color) {
-		fprintf(stream, "%s%s%s", ESL_SEQ_DEFAULT_COLOR, ESL_SEQ_FYELLOW, ESL_SEQ_BBLUE);
-	}
-
-#ifndef DISABLE_CC
-	fprintf(stream, "%s%s", banner, use);
-#else
-	fprintf(stream, "%s", banner);
-#endif
-
-	if (color) {
-		fprintf(stream, "%s", ESL_SEQ_DEFAULT_COLOR);
-	}
-
-	fprintf(stream, "\n%s\n", inf);
-
-
-	if (color) {
-		fprintf(stream, "%s", output_text_color);
+		fprintf(stream, "%s%s", ESL_SEQ_DEFAULT_COLOR, ESL_SEQ_FYELLOW);
 	}
 #endif
-
-	if (x < 160) {
-		fprintf(stream, "\n[This app Best viewed at 160x60 or more..]\n");
+	fprintf(stream, "\nFreeSWITCH console powered by FS PBX (www.fspbx.com)\n\n");
+#ifdef WIN32
+	fflush(stream);
+	if (use_color) {
+		SetConsoleTextAttribute(console, info.wAttributes);
 	}
+#else
+	if (color) {
+		fprintf(stream, "%s%s", ESL_SEQ_DEFAULT_COLOR, output_text_color);
+	}
+#endif
+}
+
+static void print_status(FILE *stream, esl_handle_t *handle)
+{
+	const char *body = NULL;
+
+	/* Read the connected server's version and statistics before enabling logs. */
+	esl_mutex_lock(MUTEX);
+	if (esl_send_recv(handle, "api status\n\n") == ESL_SUCCESS && handle->last_sr_event) {
+		body = handle->last_sr_event->body;
+	}
+	if (!esl_strlen_zero(body) && strncasecmp(body, "-ERR", 4)) {
+		fprintf(stream, "%s\n", body);
+	} else {
+		fprintf(stream, "Server status unavailable. Type status to retry.\n\n");
+	}
+	esl_mutex_unlock(MUTEX);
 }
 
 static void set_fn_keys(cli_profile_t *profile)
@@ -1856,16 +1805,20 @@ int main(int argc, char *argv[])
 		wOldColorAttrs = csbiInfo.wAttributes;
 	}
 #endif
-	if (!argv_quiet && !profile->quiet) {
-		snprintf(cmd_str, sizeof(cmd_str), "log %s\n\n", profile->loglevel);
-		esl_send_recv(&handle, cmd_str);
-	}
 	if (global_profile->batch_mode) {
 		setvbuf(stdout, (char*)NULL, _IONBF, 0);
 	}
 	print_banner(stdout, is_color);
-	esl_log(ESL_LOG_INFO, "FS CLI Ready.\nenter /help for a list of commands.\n");
-	output_printf("%s\n", handle.last_sr_reply);
+	if (!global_profile->batch_mode) {
+		print_status(stdout, &handle);
+	}
+	fprintf(stdout, "Type status to refresh, /help for commands, /exit to quit.\n\n");
+	if (!argv_quiet && !profile->quiet) {
+		snprintf(cmd_str, sizeof(cmd_str), "log %s\n\n", profile->loglevel);
+		esl_send_recv(&handle, cmd_str);
+		output_printf("%s\n", handle.last_sr_reply);
+	}
+	esl_log(ESL_LOG_INFO, "FS CLI Ready.\n");
 	while (running > 0) {
 		int r;
 
